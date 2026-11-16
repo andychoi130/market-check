@@ -4,7 +4,7 @@ import pandas as pd
 
 st.set_page_config(page_title="내 시장 체크", page_icon="📊", layout="centered")
 
-# ===== 확인할 자산 (코드: 이름) — 자유롭게 추가·삭제 =====
+# ===== 기본 관심 자산 (코드: 이름) — 앱에서 추가·삭제하기 전의 처음 목록 =====
 ASSETS = {
     "278530": "KODEX 200TR",
     "411060": "ACE KRX금현물",
@@ -83,19 +83,43 @@ def resolve(query):
     names = krx_list()
     if q in names:                       # 정확한 종목명 (예: 삼성전자)
         return names[q], q
-    for name, code in names.items():     # 코드로 입력했으면 이름 찾아주기
-        if code == q:
-            return code, name
-    return q.upper(), q.upper()          # 그 외에는 티커로 간주 (예: AAPL)
+    code = q.upper()
+    return code, name_of(code)           # 그 외에는 코드·티커로 간주 (예: AAPL)
 
 
-def show_card(code, name):
+def name_of(code):
+    """코드로 표시 이름 찾기"""
+    if code in ASSETS:
+        return ASSETS[code]
+    for name, c in krx_list().items():
+        if c == code:
+            return name
+    return code
+
+
+# ===== 관심 자산 목록: 주소창(URL)에 저장 =====
+def get_watchlist():
+    saved = st.query_params.get("w")
+    if saved is None:
+        return list(ASSETS.keys())
+    return [c for c in saved.split(",") if c]
+
+
+def save_watchlist(codes):
+    st.query_params["w"] = ",".join(codes)
+    st.rerun()
+
+
+def show_card(code, name, action=None):
     try:
         close = load(code)
         if len(close) < 2:
             raise ValueError("데이터가 너무 적어요")
     except Exception as e:
         st.warning(f"{name}: 데이터를 불러오지 못했어요. 코드나 티커를 다시 확인해 주세요. ({e})")
+        if action == "remove":
+            if st.button(f"🗑️ {name} 삭제", key=f"del_{code}"):
+                save_watchlist([c for c in get_watchlist() if c != code])
         return
 
     r = analyze(close)
@@ -124,6 +148,17 @@ def show_card(code, name):
             }).iloc[-380:]
             st.line_chart(chart)
 
+        # 관심 자산 추가·삭제 버튼
+        watch = get_watchlist()
+        if action == "add":
+            if code in watch:
+                st.caption("⭐ 이미 관심 자산에 있어요")
+            elif st.button("⭐ 관심 자산에 추가", key=f"add_{code}"):
+                save_watchlist(watch + [code])
+        elif action == "remove":
+            if st.button("🗑️ 관심 자산에서 삭제", key=f"del_{code}"):
+                save_watchlist([c for c in watch if c != code])
+
 
 # ===== 화면 =====
 st.title("📊 내 시장 체크")
@@ -138,17 +173,25 @@ query = st.text_input(
 if query:
     code, name = resolve(query)
     with st.spinner(f"{name} 분석 중..."):
-        show_card(code, name)
+        show_card(code, name, action="add")
 
 st.divider()
 st.markdown("#### ⭐ 내 관심 자산")
 
-if st.button("🔄 지금 새로고침"):
+c1, c2 = st.columns(2)
+if c1.button("🔄 지금 새로고침"):
     st.cache_data.clear()
     st.rerun()
+if c2.button("↩️ 기본 목록으로"):
+    save_watchlist(list(ASSETS.keys()))
 
-for code, name in ASSETS.items():
-    show_card(code, name)
+st.caption("📌 추가·삭제한 목록은 이 페이지 주소에 저장돼요. 바꾼 뒤에는 지금 주소를 즐겨찾기나 홈 화면에 다시 추가하세요.")
+
+watchlist = get_watchlist()
+if not watchlist:
+    st.info("관심 자산이 비어 있어요. 위 검색창에서 종목을 찾아 ⭐ 추가를 눌러보세요.")
+for code in watchlist:
+    show_card(code, name_of(code), action="remove")
 
 st.divider()
 st.caption(
