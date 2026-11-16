@@ -1,6 +1,10 @@
 import streamlit as st
 import FinanceDataReader as fdr
 import pandas as pd
+import urllib.request
+import urllib.parse
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 
 st.set_page_config(page_title="내 시장 체크", page_icon="📊", layout="centered")
 
@@ -24,6 +28,41 @@ RULE_NAMES = {
 @st.cache_data(ttl=3600)  # 1시간 동안은 다시 받지 않고 저장해 둔 데이터 사용
 def load(code):
     return fdr.DataReader(code, "2022-01-01")["Close"].dropna()
+
+
+@st.cache_data(ttl=1800)  # 뉴스는 30분마다 갱신
+def fetch_news(query, limit=5):
+    """구글 뉴스 RSS에서 최신 기사 제목·링크 가져오기 (키 필요 없음)"""
+    url = ("https://news.google.com/rss/search?q=" + urllib.parse.quote(query)
+           + "+when:7d&hl=ko&gl=KR&ceid=KR:ko")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        root = ET.fromstring(resp.read())
+
+    items = []
+    for item in root.iter("item"):
+        title = item.findtext("title", "")
+        source = item.findtext("source", "")
+        if source and title.endswith(" - " + source):   # 제목 끝의 " - 언론사" 제거
+            title = title[: -len(" - " + source)]
+        try:
+            when = parsedate_to_datetime(item.findtext("pubDate")).astimezone(
+                pd.Timestamp.now(tz="Asia/Seoul").tz).strftime("%m/%d %H:%M")
+        except Exception:
+            when = ""
+        title = title.replace("[", "［").replace("]", "］")   # 마크다운 링크 깨짐 방지
+        items.append({"title": title, "link": item.findtext("link", ""),
+                      "source": source, "when": when})
+        if len(items) >= limit:
+            break
+    return items
+
+
+def news_query(code, name):
+    """뉴스 검색어 만들기"""
+    if "/" in code:                       # 환율: USD/KRW → "USD 환율"
+        return f"{code.split('/')[0]} 환율"
+    return f'"{name}"'                    # 종목명이 정확히 들어간 기사
 
 
 def label(signal):
@@ -147,6 +186,18 @@ def show_card(code, name, action=None):
                 "200일선": r["ma200"],
             }).iloc[-380:]
             st.line_chart(chart)
+
+        with st.expander("📰 관련 뉴스 (최근 7일)"):
+            try:
+                news = fetch_news(news_query(code, name))
+                if not news:
+                    st.caption("최근 7일 동안 관련 뉴스가 없어요.")
+                for n in news:
+                    st.markdown(f"- [{n['title']}]({n['link']})  \n"
+                                f"  <small>{n['source']} · {n['when']}</small>",
+                                unsafe_allow_html=True)
+            except Exception as e:
+                st.caption(f"뉴스를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요. ({e})")
 
         # 관심 자산 추가·삭제 버튼
         watch = get_watchlist()
