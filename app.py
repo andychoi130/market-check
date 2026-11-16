@@ -11,6 +11,7 @@ ASSETS = {
     "360750": "TIGER 미국S&P500",
     "005380": "현대차",
     "SPCX": "스페이스X",
+    "USD/KRW": "원/달러 환율",
 }
 
 RULE_NAMES = {
@@ -112,6 +113,8 @@ def show_card(code, name):
             st.write(f"**{RULE_NAMES[key]}**: {text}")
 
         st.caption(f"기준일 {close.index[-1].date()} · 판단 근거: 규칙 {r['valid']}/3개")
+        if "/" in code:
+            st.caption("💱 환율이 '상승 추세'면 원화 약세(달러 강세), '하락 추세'면 원화 강세라는 뜻이에요.")
 
         with st.expander("📈 차트 보기 (최근 1년 반)"):
             chart = pd.DataFrame({
